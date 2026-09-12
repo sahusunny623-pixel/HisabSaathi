@@ -1,0 +1,9 @@
+{
+  "name": "HisabSaathi",
+  "short_name": "HisabSaathi",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f8f6",
+  "theme_color": "#0f6b45",
+  "description": "Dukaan ka poora hisaab, ek saathi ke saath."
+}
