@@ -23,7 +23,53 @@ function expire(){const now=new Date().toISOString();db.prepare("UPDATE shops SE
 function premium(req,res,next){expire();const s=db.prepare('SELECT * FROM shops WHERE id=?').get(req.shopId);if(!s)return res.status(401).json({error:'Shop not found'});const a=accessFor(s);if(!a.active)return res.status(402).json({error:'Premium subscription required',code:'PREMIUM_REQUIRED',subscription_status:s.subscription_status});req.access=a;next();}
 function admin(req,res,next){const secret=process.env.ADMIN_VERIFY_SECRET;if(!secret||req.headers['x-admin-verify-secret']!==secret)return res.status(401).json({error:'Unauthorized'});next();}
 function saveProof(data,orderId){const m=String(data||'').match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/);if(!m)throw new Error('Upload a valid image receipt');const ext=m[1]==='jpeg'?'jpg':m[1];const file=path.join(UPLOAD_DIR,`${orderId}.${ext}`);fs.writeFileSync(file,Buffer.from(m[2],'base64'),{mode:0o600});return file;}
-async function notifyOwner(payload,proofPath){const token=process.env.WHATSAPP_TOKEN,phoneId=process.env.WHATSAPP_PHONE_NUMBER_ID,to=process.env.ADMIN_WHATSAPP_TO||'916206769679';if(!token||!phoneId)return false;try{const base=`https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION||'v23.0'}/${phoneId}`;const text=`HisabSaathi payment claim\nProfile: ${payload.profile_id}\nShop: ${payload.shop_name}\nAmount: ₹149\nUTR: ${payload.utr}\nOrder: ${payload.order_id}\nVerify actual payment before approval.`;const r=await fetch(`${base}/messages`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',to,type:'text',text:{body:text}})});if(!r.ok)return false;if(proofPath&&fs.existsSync(proofPath)){const form=new FormData();form.append('messaging_product','whatsapp');form.append('file',new Blob([fs.readFileSync(proofPath)],{type:'image/jpeg'}),'receipt.jpg');const u=await fetch(`${base}/media`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:form});const j=await u.json();if(u.ok&&j.id)await fetch(`${base}/messages`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',to,type:'image',image:{id:j.id,caption:`Receipt • ${payload.profile_id} • UTR ${payload.utr}`}})});}return true;}catch{return false;}}
+function waNumber(raw){return String(raw||'').replace(/\D/g,'');}
+async function notifyOwner(payload,proofPath){
+  const token=process.env.WHATSAPP_TOKEN;
+  const phoneId=process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const to=waNumber(process.env.ADMIN_WHATSAPP_TO||'916206769679');
+  const version=process.env.WHATSAPP_API_VERSION||'v23.0';
+  if(!token||!phoneId||!to){console.warn('WhatsApp notification skipped: credentials/recipient not configured');return {sent:false,reason:'whatsapp_not_configured'};}
+  try{
+    const base=`https://graph.facebook.com/${version}/${phoneId}`;
+    const mode=(process.env.WHATSAPP_MESSAGE_MODE||'template').toLowerCase();
+    let response;
+    if(mode==='template'){
+      const templateName=String(process.env.WHATSAPP_TEMPLATE_NAME||'hisabsaathi_payment_claim').trim();
+      const languageCode=String(process.env.WHATSAPP_TEMPLATE_LANGUAGE||'en_US').trim();
+      const body={messaging_product:'whatsapp',to,type:'template',template:{name:templateName,language:{code:languageCode},components:[{type:'body',parameters:[
+        {type:'text',parameter_name:'profile_id',text:String(payload.profile_id)},
+        {type:'text',parameter_name:'shop_name',text:String(payload.shop_name||'-')},
+        {type:'text',parameter_name:'amount',text:String(payload.amount||149)},
+        {type:'text',parameter_name:'utr',text:String(payload.utr)},
+        {type:'text',parameter_name:'order_id',text:String(payload.order_id)}
+      ]}]}};
+      response=await fetch(`${base}/messages`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }else{
+      const text=`HisabSaathi payment claim\nProfile: ${payload.profile_id}\nShop: ${payload.shop_name||'-'}\nAmount: ₹${payload.amount||149}\nUTR: ${payload.utr}\nOrder: ${payload.order_id}\nVerify actual payment before approval.`;
+      response=await fetch(`${base}/messages`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',to,type:'text',text:{body:text}})});
+    }
+    const responseJson=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(responseJson?.error?.message||`WhatsApp message failed (${response.status})`);
+    let proofSent=false;
+    if(proofPath&&fs.existsSync(proofPath)&&String(process.env.WHATSAPP_SEND_PROOF_IMAGE||'true').toLowerCase()==='true'){
+      const form=new FormData();
+      const ext=path.extname(proofPath).toLowerCase();
+      const mime=ext==='.png'?'image/png':ext==='.webp'?'image/webp':'image/jpeg';
+      form.append('messaging_product','whatsapp');
+      form.append('file',new Blob([fs.readFileSync(proofPath)],{type:mime}),`payment-proof${ext||'.jpg'}`);
+      const upload=await fetch(`${base}/media`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:form});
+      const media=await upload.json().catch(()=>({}));
+      if(!upload.ok||!media.id)throw new Error(media?.error?.message||`WhatsApp media upload failed (${upload.status})`);
+      const image=await fetch(`${base}/messages`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',to,type:'image',image:{id:media.id,caption:`Receipt • ${payload.profile_id} • UTR ${payload.utr}`}})});
+      const imageJson=await image.json().catch(()=>({}));
+      if(!image.ok)throw new Error(imageJson?.error?.message||`WhatsApp proof send failed (${image.status})`);
+      proofSent=true;
+    }
+    return {sent:true,proof_sent:proofSent,message_id:responseJson?.messages?.[0]?.id||null};
+  }catch(e){console.error('WhatsApp owner notification failed:',e.message);return {sent:false,reason:'request_failed',error:e.message};}
+}
+
 app.get('/api/health',(_q,r)=>r.json({ok:true,service:'HisabSaathi',time:new Date().toISOString()}));
 app.post('/api/shops',(req,res)=>{try{const name=String(req.body.name||'').trim();if(!name)throw new Error('Shop name is required');const sid=id(),token=issueAccessToken(),profile=newProfile();db.prepare(`INSERT INTO shops(id,name,address,category,owner_name,language,subscription_status,profile_id,access_token_hash) VALUES(?,?,?,?,?,?,?,?,?)`).run(sid,name,String(req.body.address||''),String(req.body.category||''),String(req.body.owner_name||''),String(req.body.language||'hi'),'trial',profile,hashToken(token));res.status(201).json({shop:db.prepare('SELECT * FROM shops WHERE id=?').get(sid),access_token:token});}catch(e){res.status(400).json({error:e.message});}});
 app.use('/api',authRequired);
