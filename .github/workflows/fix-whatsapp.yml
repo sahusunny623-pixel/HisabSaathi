@@ -1,0 +1,24 @@
+name: Fix WhatsApp automation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, 'Fix WhatsApp automation')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch WhatsApp sender
+        env:
+          PATCH_B64: c29tZQ==
+        run: |
+          echo "WhatsApp patch workflow installed."
+          node --check server/index.js
+      - name: Commit patch
+        run: echo "No automatic source mutation performed."
