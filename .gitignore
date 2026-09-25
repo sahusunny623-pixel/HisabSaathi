@@ -4,3 +4,10 @@ node_modules/
 *.db-shm
 *.db-wal
 .DS_Store
+attached_assets/
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+mobile/build/
+mobile/.flutter-plugins

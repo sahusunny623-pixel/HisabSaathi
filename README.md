@@ -20,12 +20,26 @@ HisabSaathi is a small-shop management SaaS focused on billing, inventory, custo
 ## Payment verification
 A screenshot or UTR claim does **not** automatically activate Premium. Premium is activated only after trusted payment verification by an admin or a compliant payment-provider webhook.
 
-## Production notes
-- Configure secrets in `.env`; never commit credentials.
-- Use HTTPS in production.
-- For multi-instance production, prefer PostgreSQL/object storage over local SQLite/filesystem.
-- WhatsApp Cloud API requires valid Meta credentials and approved messaging configuration.
-- Configure `UPI_WEBHOOK_SECRET` only when a trusted payment provider webhook is available.
+## Architecture migration
+
+The production target is Supabase Auth + PostgreSQL + private Storage, with a
+Flutter/Dart mobile client. The initial schema, RLS policies, auth foundation,
+SQLite cache, and idempotent sync queue live under:
+
+- `supabase/migrations/`
+- `supabase/tests/`
+- `mobile/`
+- `docs/`
+
+The existing Express/SQLite/PWA stack is retained temporarily so valid legacy
+functionality is not removed before replacement and data reconciliation are
+complete. It is not the target production source of truth.
+
+## Secrets and configuration
+
+Use Replit Secrets for credentials. `.env.example` contains variable names
+only. Never commit Supabase service-role keys, provider tokens, admin secrets,
+or webhook secrets.
 
 ## Local run
 ```bash
@@ -34,3 +48,14 @@ npm start
 ```
 
 The app serves from `web/` and the API from `server/`.
+
+## Tests
+
+```bash
+npm test
+npm run check
+```
+
+Flutter and Supabase integration commands are documented in
+`mobile/README.md` and `docs/TEST_PLAN.md`; they require toolchains that are
+not installed in the current Replit environment.

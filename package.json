@@ -6,17 +6,18 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "check": "node --check server/index.js && node --check server/worker.js && node --check server/auth.js",
+    "check": "node --check server/index.js && node --check server/worker.js && node --check server/auth.js && node --check src/core/financial.js && node --check src/sync/sync-queue.js",
+    "test": "node --test",
     "worker": "node server/worker.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
     "morgan": "^1.10.0",
-    "zod": "^3.24.1",
-    "express-rate-limit": "^7.5.0"
+    "zod": "^3.24.1"
   }
 }
